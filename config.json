@@ -1,0 +1,13 @@
+{
+  "yandex_table_public_url": "https://disk.yandex.ru/i/_4z0HyWTVhk57w",
+  "cards_per_section": 40,
+  "sections": [
+    {"slug": "listening", "sheet": "Listening", "title": "Listening", "page": "listening.html"},
+    {"slug": "reading-1", "sheet": "Reading 1", "title": "Reading 1", "page": "reading-1.html"},
+    {"slug": "reading-2", "sheet": "Reading 2", "title": "Reading 2", "page": "reading-2.html"},
+    {"slug": "writing", "sheet": "Writing", "title": "Writing", "page": "writing.html"},
+    {"slug": "speaking-1", "sheet": "Speaking 1", "title": "Speaking 1", "page": "speaking-1.html"},
+    {"slug": "speaking-2", "sheet": "Speaking 2", "title": "Speaking 2", "page": "speaking-2.html"},
+    {"slug": "speaking-3", "sheet": "Speaking 3", "title": "Speaking 3", "page": "speaking-3.html"}
+  ]
+}
