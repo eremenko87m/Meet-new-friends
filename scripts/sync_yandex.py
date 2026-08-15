@@ -3,65 +3,108 @@ from __future__ import annotations
 import io
 import json
 import mimetypes
+import posixpath
 import re
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import requests
 from openpyxl import load_workbook
 from openpyxl.utils.cell import coordinate_to_tuple
 
+
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+
+CONFIG = json.loads(
+    (ROOT / "config.json").read_text(
+        encoding="utf-8"
+    )
+)
+
 DATA_PATH = ROOT / "data" / "exercises.json"
 MEDIA_ROOT = ROOT / "assets" / "media"
-YANDEX_META_API = "https://cloud-api.yandex.net/v1/disk/public/resources"
-YANDEX_DOWNLOAD_API = "https://cloud-api.yandex.net/v1/disk/public/resources/download"
+
+YANDEX_META_API = (
+    "https://cloud-api.yandex.net/"
+    "v1/disk/public/resources"
+)
+
+YANDEX_DOWNLOAD_API = (
+    "https://cloud-api.yandex.net/"
+    "v1/disk/public/resources/download"
+)
+
 TIMEOUT = 45
 
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, max-age=0",
     "Pragma": "no-cache",
-    "User-Agent": "ExerciseLibrarySync/3.0",
+    "User-Agent": "ExerciseLibrarySync/4.0",
 }
 
 
+# =========================================================
+# YANDEX DOWNLOAD
+# =========================================================
+
+
 def yandex_metadata(public_url: str) -> dict:
+
     r = requests.get(
         YANDEX_META_API,
         params={
             "public_key": public_url,
-            "fields": "name,modified,size,type,mime_type",
+            "fields": (
+                "name,modified,size,"
+                "type,mime_type"
+            ),
         },
         headers=NO_CACHE_HEADERS,
         timeout=TIMEOUT,
     )
+
     r.raise_for_status()
+
     return r.json()
 
 
 def yandex_direct(public_url: str) -> str:
+
     r = requests.get(
         YANDEX_DOWNLOAD_API,
-        params={"public_key": public_url},
+        params={
+            "public_key": public_url
+        },
         headers=NO_CACHE_HEADERS,
         timeout=TIMEOUT,
     )
+
     r.raise_for_status()
 
     href = r.json().get("href")
+
     if not href:
+
         raise RuntimeError(
-            f"Yandex did not return a download URL for {public_url}"
+            "Yandex did not return "
+            "a download URL for "
+            f"{public_url}"
         )
 
     return href
 
 
-def download_public_file(public_url: str) -> bytes:
-    meta = yandex_metadata(public_url)
+def download_public_file(
+    public_url: str
+) -> bytes:
+
+    meta = yandex_metadata(
+        public_url
+    )
 
     print(
         "Yandex source:",
@@ -71,7 +114,9 @@ def download_public_file(public_url: str) -> bytes:
         f"type={meta.get('type')!r}",
     )
 
-    href = yandex_direct(public_url)
+    href = yandex_direct(
+        public_url
+    )
 
     r = requests.get(
         href,
@@ -84,41 +129,403 @@ def download_public_file(public_url: str) -> bytes:
     content = r.content
 
     if len(content) < 100:
+
         raise RuntimeError(
-            f"Downloaded Yandex file is unexpectedly small: "
+            "Downloaded Yandex file "
+            "is unexpectedly small: "
             f"{len(content)} bytes"
         )
 
+    # XLSX is actually a ZIP archive,
+    # so it normally starts with PK.
+
     if not content.startswith(b"PK"):
+
         raise RuntimeError(
-            "The public Yandex link did not download an XLSX file. "
-            f"Content-Type={r.headers.get('content-type')!r}"
+            "The public Yandex link "
+            "did not download an XLSX file. "
+            "Content-Type="
+            f"{r.headers.get('content-type')!r}"
         )
 
-    print(f"Downloaded workbook: {len(content)} bytes")
+    print(
+        "Downloaded workbook:",
+        len(content),
+        "bytes"
+    )
 
     return content
 
 
-def is_yandex_share(url: str) -> bool:
-    try:
-        host = urlparse(url).netloc.lower()
-        return (
-            host.endswith("disk.yandex.ru")
-            or host.endswith("yadi.sk")
+# =========================================================
+# FIX YANDEX XLSX
+# =========================================================
+
+
+def sanitize_broken_table_references(
+    content: bytes
+) -> bytes:
+    """
+    Yandex can export an XLSX with
+    references to Excel tables such as:
+
+    xl/tables/table1.xml
+
+    even though the actual table1.xml
+    file is missing.
+
+    openpyxl then crashes with:
+
+    KeyError:
+    There is no item named
+    'xl/tables/table1.xml'
+
+    We remove ONLY those broken
+    table references.
+
+    Cell values and pictures remain.
+    """
+
+    REL_NS = (
+        "http://schemas.openxmlformats.org/"
+        "package/2006/relationships"
+    )
+
+    MAIN_NS = (
+        "http://schemas.openxmlformats.org/"
+        "spreadsheetml/2006/main"
+    )
+
+    DOC_REL_NS = (
+        "http://schemas.openxmlformats.org/"
+        "officeDocument/2006/relationships"
+    )
+
+    ET.register_namespace(
+        "",
+        REL_NS
+    )
+
+    ET.register_namespace(
+        "r",
+        DOC_REL_NS
+    )
+
+    source = io.BytesIO(
+        content
+    )
+
+    with ZipFile(
+        source,
+        "r"
+    ) as zin:
+
+        names = set(
+            zin.namelist()
         )
-    except Exception:
-        return False
+
+        replacements = {}
+
+        removed_total = 0
+
+        for rels_name in names:
+
+            if not (
+                rels_name.startswith(
+                    "xl/worksheets/_rels/"
+                )
+                and rels_name.endswith(
+                    ".xml.rels"
+                )
+            ):
+                continue
+
+            rel_root = ET.fromstring(
+                zin.read(
+                    rels_name
+                )
+            )
+
+            removed_ids = set()
+
+            changed = False
+
+            # Example:
+            #
+            # sheet1.xml.rels
+            # ->
+            # sheet1.xml
+
+            sheet_filename = (
+                rels_name
+                .rsplit("/", 1)[-1][:-5]
+            )
+
+            sheet_name = (
+                "xl/worksheets/"
+                + sheet_filename
+            )
+
+            for rel in list(
+                rel_root
+            ):
+
+                rel_type = (
+                    rel.attrib.get(
+                        "Type",
+                        ""
+                    )
+                )
+
+                if not rel_type.endswith(
+                    "/table"
+                ):
+                    continue
+
+                target = (
+                    rel.attrib.get(
+                        "Target",
+                        ""
+                    )
+                )
+
+                if target.startswith(
+                    "/"
+                ):
+
+                    target_path = (
+                        target.lstrip("/")
+                    )
+
+                else:
+
+                    target_path = (
+                        posixpath.normpath(
+                            posixpath.join(
+                                posixpath.dirname(
+                                    sheet_name
+                                ),
+                                target,
+                            )
+                        )
+                    )
+
+                # If target exists,
+                # everything is fine.
+
+                if target_path in names:
+                    continue
+
+                relationship_id = (
+                    rel.attrib.get(
+                        "Id",
+                        ""
+                    )
+                )
+
+                print(
+                    "Removing broken XLSX "
+                    "table relationship:",
+                    rels_name,
+                    relationship_id,
+                    "->",
+                    target_path,
+                )
+
+                removed_ids.add(
+                    relationship_id
+                )
+
+                rel_root.remove(
+                    rel
+                )
+
+                changed = True
+
+                removed_total += 1
+
+            if not changed:
+                continue
+
+            replacements[
+                rels_name
+            ] = ET.tostring(
+                rel_root,
+                encoding="utf-8",
+                xml_declaration=True,
+            )
+
+            # Remove corresponding
+            # <tablePart> from worksheet.
+
+            if (
+                sheet_name in names
+                and removed_ids
+            ):
+
+                sheet_root = (
+                    ET.fromstring(
+                        zin.read(
+                            sheet_name
+                        )
+                    )
+                )
+
+                table_parts = (
+                    sheet_root.find(
+                        f"{{{MAIN_NS}}}"
+                        "tableParts"
+                    )
+                )
+
+                if (
+                    table_parts
+                    is not None
+                ):
+
+                    for table_part in list(
+                        table_parts
+                    ):
+
+                        rid = (
+                            table_part
+                            .attrib
+                            .get(
+                                f"{{{DOC_REL_NS}}}"
+                                "id"
+                            )
+                        )
+
+                        if rid in removed_ids:
+
+                            table_parts.remove(
+                                table_part
+                            )
+
+                    remaining = list(
+                        table_parts
+                    )
+
+                    if not remaining:
+
+                        sheet_root.remove(
+                            table_parts
+                        )
+
+                    else:
+
+                        table_parts.set(
+                            "count",
+                            str(
+                                len(
+                                    remaining
+                                )
+                            ),
+                        )
+
+                    replacements[
+                        sheet_name
+                    ] = ET.tostring(
+                        sheet_root,
+                        encoding="utf-8",
+                        xml_declaration=True,
+                    )
+
+        if removed_total == 0:
+
+            print(
+                "No broken XLSX table "
+                "relationships found."
+            )
+
+            return content
+
+        print(
+            "Removed",
+            removed_total,
+            "broken XLSX table "
+            "relationship(s)."
+        )
+
+        output = io.BytesIO()
+
+        with ZipFile(
+            output,
+            "w",
+            ZIP_DEFLATED
+        ) as zout:
+
+            for info in (
+                zin.infolist()
+            ):
+
+                data = (
+                    replacements.get(
+                        info.filename,
+                        zin.read(
+                            info.filename
+                        ),
+                    )
+                )
+
+                zout.writestr(
+                    info,
+                    data
+                )
+
+        return output.getvalue()
+
+
+# =========================================================
+# BASIC HELPERS
+# =========================================================
 
 
 def clean_text(value) -> str:
+
     if value is None:
         return ""
 
-    if isinstance(value, bool):
-        return "YES" if value else "NO"
+    if isinstance(
+        value,
+        bool
+    ):
 
-    return str(value).strip()
+        return (
+            "YES"
+            if value
+            else "NO"
+        )
+
+    return str(
+        value
+    ).strip()
+
+
+def is_yandex_share(
+    url: str
+) -> bool:
+
+    try:
+
+        host = (
+            urlparse(url)
+            .netloc
+            .lower()
+        )
+
+        return (
+            host.endswith(
+                "disk.yandex.ru"
+            )
+            or host.endswith(
+                "yadi.sk"
+            )
+        )
+
+    except Exception:
+
+        return False
 
 
 def ext_from_response(
@@ -132,28 +539,44 @@ def ext_from_response(
     )
 
     m = re.search(
-        r"filename\*?=(?:UTF-8'')?[\"']?([^\"';]+)",
+        r"filename\*?="
+        r"(?:UTF-8'')?"
+        r"[\"']?"
+        r"([^\"';]+)",
         cd,
         re.I,
     )
 
     if m:
-        suffix = Path(m.group(1)).suffix
+
+        suffix = Path(
+            m.group(1)
+        ).suffix
 
         if suffix:
             return suffix.lower()
 
     ct = (
         resp.headers
-        .get("content-type", "")
+        .get(
+            "content-type",
+            ""
+        )
         .split(";")[0]
         .strip()
     )
 
     return (
-        mimetypes.guess_extension(ct)
+        mimetypes.guess_extension(
+            ct
+        )
         or fallback
     )
+
+
+# =========================================================
+# MEDIA FROM LINKS
+# =========================================================
 
 
 def clear_old_media(
@@ -162,7 +585,10 @@ def clear_old_media(
     kind: str,
 ) -> None:
 
-    folder = MEDIA_ROOT / section
+    folder = (
+        MEDIA_ROOT
+        / section
+    )
 
     if not folder.exists():
         return
@@ -170,7 +596,10 @@ def clear_old_media(
     for old in folder.glob(
         f"{no:02d}-{kind}.*"
     ):
-        old.unlink(missing_ok=True)
+
+        old.unlink(
+            missing_ok=True
+        )
 
 
 def cache_media(
@@ -180,16 +609,30 @@ def cache_media(
     kind: str,
 ) -> str:
 
-    url = clean_text(url)
+    url = clean_text(
+        url
+    )
 
     if not url:
         return ""
 
-    if not is_yandex_share(url):
+    # Normal external URL:
+    # leave as-is.
+
+    if not is_yandex_share(
+        url
+    ):
+
         return url
 
+    # Yandex public link:
+    # download media into site.
+
     try:
-        href = yandex_direct(url)
+
+        href = yandex_direct(
+            url
+        )
 
         resp = requests.get(
             href,
@@ -210,7 +653,11 @@ def cache_media(
             fallback,
         )
 
-        folder = MEDIA_ROOT / section
+        folder = (
+            MEDIA_ROOT
+            / section
+        )
+
         folder.mkdir(
             parents=True,
             exist_ok=True,
@@ -238,20 +685,31 @@ def cache_media(
         )
 
     except Exception as exc:
+
         print(
-            f"WARNING media {url}: "
-            f"{exc}"
+            "WARNING media",
+            url,
+            ":",
+            exc
         )
 
         return url
 
 
-def image_anchor_position(img):
+# =========================================================
+# EMBEDDED / FLOATING PICTURES FROM EXCEL
+# =========================================================
+
+
+def image_anchor_position(
+    img
+):
     """
     Returns:
+
     (excel_row, excel_col)
 
-    Coordinates are 1-based.
+    Both are 1-based.
     """
 
     anchor = getattr(
@@ -263,15 +721,27 @@ def image_anchor_position(img):
     if anchor is None:
         return None
 
-    if isinstance(anchor, str):
+    # Sometimes anchor can
+    # simply be "D2".
+
+    if isinstance(
+        anchor,
+        str
+    ):
 
         try:
-            return coordinate_to_tuple(
-                anchor
+
+            return (
+                coordinate_to_tuple(
+                    anchor
+                )
             )
 
         except Exception:
+
             return None
+
+    # Normal openpyxl anchor.
 
     marker = getattr(
         anchor,
@@ -282,18 +752,26 @@ def image_anchor_position(img):
     if marker is not None:
 
         try:
+
             return (
-                int(marker.row) + 1,
-                int(marker.col) + 1,
+                int(
+                    marker.row
+                ) + 1,
+                int(
+                    marker.col
+                ) + 1,
             )
 
         except Exception:
+
             return None
 
     return None
 
 
-def embedded_image_bytes(img):
+def embedded_image_bytes(
+    img
+):
 
     data_method = getattr(
         img,
@@ -301,7 +779,10 @@ def embedded_image_bytes(img):
         None,
     )
 
-    if not callable(data_method):
+    if not callable(
+        data_method
+    ):
+
         raise RuntimeError(
             "openpyxl image object "
             "has no readable image data"
@@ -310,8 +791,10 @@ def embedded_image_bytes(img):
     raw = data_method()
 
     if not raw:
+
         raise RuntimeError(
-            "embedded image has no data"
+            "embedded image "
+            "has no data"
         )
 
     fmt = clean_text(
@@ -332,6 +815,7 @@ def embedded_image_bytes(img):
         "bmp",
         "tiff",
     }:
+
         fmt = "png"
 
     ext = (
@@ -349,16 +833,17 @@ def embedded_images_for_rows(
     cards_per: int,
 ):
     """
-    Finds floating pictures in the sheet.
+    Find floating pictures.
 
-    The picture is assigned to the card
-    based on the row where the picture's
-    top-left corner is located.
+    Picture is assigned to card
+    according to the row where
+    its top-left corner sits.
 
-    For example:
-    D2 -> card 1
-    D3 -> card 2
-    D4 -> card 3
+    Examples:
+
+    D2 = card 1
+    D3 = card 2
+    D4 = card 3
     """
 
     images = list(
@@ -371,36 +856,51 @@ def embedded_images_for_rows(
     )
 
     if not images:
+
         print(
             f"{ws.title}: "
             "0 embedded picture(s)"
         )
+
         return {}
 
-    candidates = defaultdict(list)
+    candidates = defaultdict(
+        list
+    )
 
-    for order, img in enumerate(images):
+    for order, img in enumerate(
+        images
+    ):
 
         pos = image_anchor_position(
             img
         )
 
         if not pos:
+
             print(
                 f"WARNING {ws.title}: "
-                f"embedded picture "
+                "embedded picture "
                 f"#{order + 1} "
                 "has no readable anchor"
             )
+
             continue
 
         excel_row, excel_col = pos
+
+        # Row 1 = header.
+        # Exercise rows begin at 2.
 
         if (
             2
             <= excel_row
             <= cards_per + 1
         ):
+
+            # row_map uses zero-based
+            # indexes, Excel columns
+            # are one-based.
 
             target_col = (
                 image_col_index + 1
@@ -432,6 +932,10 @@ def embedded_images_for_rows(
         row_candidates,
     ) in candidates.items():
 
+        # If several pictures exist
+        # in same row, use picture
+        # closest to Image column.
+
         row_candidates.sort(
             key=lambda item: (
                 item[0],
@@ -460,10 +964,10 @@ def embedded_images_for_rows(
                 f"NOTE {ws.title}: "
                 f"picture in row "
                 f"{excel_row} "
-                f"is anchored in "
+                "is anchored in "
                 f"column {excel_col}; "
-                f"using it for "
-                f"Image column "
+                "using it for Image "
+                f"column "
                 f"{image_col_index + 1}."
             )
 
@@ -484,11 +988,16 @@ def save_embedded_image(
     no: int,
 ) -> str:
 
-    raw, ext = embedded_image_bytes(
-        img
+    raw, ext = (
+        embedded_image_bytes(
+            img
+        )
     )
 
-    folder = MEDIA_ROOT / section
+    folder = (
+        MEDIA_ROOT
+        / section
+    )
 
     folder.mkdir(
         parents=True,
@@ -506,7 +1015,9 @@ def save_embedded_image(
         / f"{no:02d}-image{ext}"
     )
 
-    path.write_bytes(raw)
+    path.write_bytes(
+        raw
+    )
 
     return (
         path
@@ -515,7 +1026,14 @@ def save_embedded_image(
     )
 
 
-def row_map(headers):
+# =========================================================
+# TABLE HEADERS
+# =========================================================
+
+
+def row_map(
+    headers
+):
 
     norm = {
         clean_text(v).lower(): i
@@ -580,13 +1098,18 @@ def row_map(headers):
 
     out = {}
 
-    for key, names in aliases.items():
+    for key, names in (
+        aliases.items()
+    ):
 
         for name in names:
 
             if name in norm:
 
-                out[key] = norm[name]
+                out[key] = (
+                    norm[name]
+                )
+
                 break
 
     return out
@@ -602,6 +1125,7 @@ def val(
         idx is None
         or idx >= len(row)
     ):
+
         return default
 
     return clean_text(
@@ -615,18 +1139,39 @@ def make_default(
 ):
 
     return {
-        "no": no,
-        "id": (
-            f"{section_slug}-{no}"
-        ),
-        "title": "",
-        "link": "",
-        "image": "",
-        "audio": "",
-        "level": "",
-        "notes": "",
-        "active": True,
+
+        "no":
+            no,
+
+        "id":
+            f"{section_slug}-{no}",
+
+        "title":
+            "",
+
+        "link":
+            "",
+
+        "image":
+            "",
+
+        "audio":
+            "",
+
+        "level":
+            "",
+
+        "notes":
+            "",
+
+        "active":
+            True,
     }
+
+
+# =========================================================
+# MAIN
+# =========================================================
 
 
 def main():
@@ -649,6 +1194,7 @@ def main():
     )
 
     output = {
+
         "generatedAt":
             datetime.now(
                 timezone.utc
@@ -661,17 +1207,34 @@ def main():
             {},
     }
 
-    content = download_public_file(
-        public_url
+    # 1. Download fresh Yandex file.
+
+    content = (
+        download_public_file(
+            public_url
+        )
+    )
+
+    # 2. Repair broken XLSX table
+    # references created by Yandex.
+
+    content = (
+        sanitize_broken_table_references(
+            content
+        )
     )
 
     # IMPORTANT:
-    # read_only=False is required.
-    # Otherwise Excel pictures
-    # are not loaded.
+    #
+    # read_only=False
+    #
+    # is required because otherwise
+    # openpyxl will NOT load pictures.
 
     wb = load_workbook(
-        io.BytesIO(content),
+        io.BytesIO(
+            content
+        ),
         data_only=True,
         read_only=False,
     )
@@ -684,20 +1247,29 @@ def main():
     )
 
     total_populated = 0
+
     total_embedded = 0
 
-    for sec in sections_cfg:
+    for sec in (
+        sections_cfg
+    ):
 
-        slug = sec["slug"]
-        sheet_name = sec["sheet"]
+        slug = sec[
+            "slug"
+        ]
+
+        sheet_name = sec[
+            "sheet"
+        ]
 
         cards = [
+
             make_default(
                 slug,
                 i,
             )
-            for i
-            in range(
+
+            for i in range(
                 1,
                 cards_per + 1,
             )
@@ -709,10 +1281,10 @@ def main():
         ):
 
             raise RuntimeError(
-                f"Required sheet "
+                "Required sheet "
                 f"{sheet_name!r} "
                 "is missing. "
-                f"Available sheets: "
+                "Available sheets: "
                 f"{wb.sheetnames}"
             )
 
@@ -729,6 +1301,7 @@ def main():
         )
 
         if not rows:
+
             raise RuntimeError(
                 f"Sheet "
                 f"{sheet_name!r} "
@@ -746,9 +1319,11 @@ def main():
         ]
 
         missing_headers = [
+
             key
-            for key
-            in required
+
+            for key in required
+
             if key
             not in mapping
         ]
@@ -758,12 +1333,14 @@ def main():
             raise RuntimeError(
                 f"Sheet "
                 f"{sheet_name!r} "
-                "is missing "
-                "required columns: "
+                "is missing required "
+                "columns: "
                 f"{missing_headers}. "
-                f"Header row: "
+                "Header row: "
                 f"{rows[0]}"
             )
+
+        # Find floating pictures.
 
         embedded_by_excel_row = (
             embedded_images_for_rows(
@@ -780,6 +1357,7 @@ def main():
         )
 
         populated = 0
+
         embedded_used = 0
 
         for (
@@ -806,11 +1384,15 @@ def main():
             )
 
             try:
+
                 no = int(
-                    float(no_raw)
+                    float(
+                        no_raw
+                    )
                 )
 
             except Exception:
+
                 no = position
 
             if not (
@@ -818,6 +1400,7 @@ def main():
                 <= no
                 <= cards_per
             ):
+
                 continue
 
             active_raw = val(
@@ -841,7 +1424,8 @@ def main():
 
             card = {
 
-                "no": no,
+                "no":
+                    no,
 
                 "id":
                     f"{slug}-{no}",
@@ -862,9 +1446,11 @@ def main():
                         ),
                     ),
 
-                "image": "",
+                "image":
+                    "",
 
-                "audio": "",
+                "audio":
+                    "",
 
                 "level":
                     val(
@@ -886,6 +1472,10 @@ def main():
                     active,
             }
 
+            # ---------------------------------
+            # EMBEDDED PICTURE
+            # ---------------------------------
+
             embedded_img = (
                 embedded_by_excel_row.get(
                     excel_row
@@ -901,10 +1491,12 @@ def main():
 
                     card[
                         "image"
-                    ] = save_embedded_image(
-                        embedded_img,
-                        slug,
-                        no,
+                    ] = (
+                        save_embedded_image(
+                            embedded_img,
+                            slug,
+                            no,
+                        )
                     )
 
                     embedded_used += 1
@@ -912,19 +1504,22 @@ def main():
                 except Exception as exc:
 
                     print(
-                        f"WARNING "
-                        f"{sheet_name} "
-                        f"row {excel_row}: "
-                        "could not extract "
-                        "embedded image: "
-                        f"{exc}"
+                        "WARNING",
+                        sheet_name,
+                        "row",
+                        excel_row,
+                        ": could not extract "
+                        "embedded image:",
+                        exc,
                     )
 
-            # If there is no embedded
-            # picture, try Image URL
-            # from the cell.
+            # ---------------------------------
+            # IMAGE LINK FALLBACK
+            # ---------------------------------
 
-            if not card["image"]:
+            if not card[
+                "image"
+            ]:
 
                 card[
                     "image"
@@ -939,6 +1534,10 @@ def main():
                     no,
                     "image",
                 )
+
+            # ---------------------------------
+            # AUDIO
+            # ---------------------------------
 
             card[
                 "audio"
@@ -959,9 +1558,10 @@ def main():
             ] = card
 
             if any(
+
                 card.get(k)
-                for k
-                in (
+
+                for k in (
                     "title",
                     "link",
                     "image",
@@ -1004,8 +1604,8 @@ def main():
     )
 
     print(
-        f"Updated "
-        f"{DATA_PATH}"
+        "Updated",
+        DATA_PATH
     )
 
     print(
