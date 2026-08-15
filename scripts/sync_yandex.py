@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import mimetypes
 import posixpath
@@ -43,13 +44,8 @@ TIMEOUT = 45
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, max-age=0",
     "Pragma": "no-cache",
-    "User-Agent": "ExerciseLibrarySync/4.0",
+    "User-Agent": "ExerciseLibrarySync/5.0",
 }
-
-
-# =========================================================
-# YANDEX DOWNLOAD
-# =========================================================
 
 
 def yandex_metadata(public_url: str) -> dict:
@@ -58,10 +54,7 @@ def yandex_metadata(public_url: str) -> dict:
         YANDEX_META_API,
         params={
             "public_key": public_url,
-            "fields": (
-                "name,modified,size,"
-                "type,mime_type"
-            ),
+            "fields": "name,modified,size,type,mime_type",
         },
         headers=NO_CACHE_HEADERS,
         timeout=TIMEOUT,
@@ -136,9 +129,6 @@ def download_public_file(
             f"{len(content)} bytes"
         )
 
-    # XLSX is actually a ZIP archive,
-    # so it normally starts with PK.
-
     if not content.startswith(b"PK"):
 
         raise RuntimeError(
@@ -149,47 +139,16 @@ def download_public_file(
         )
 
     print(
-        "Downloaded workbook:",
-        len(content),
-        "bytes"
+        f"Downloaded workbook: "
+        f"{len(content)} bytes"
     )
 
     return content
 
 
-# =========================================================
-# FIX YANDEX XLSX
-# =========================================================
-
-
 def sanitize_broken_table_references(
     content: bytes
 ) -> bytes:
-    """
-    Yandex can export an XLSX with
-    references to Excel tables such as:
-
-    xl/tables/table1.xml
-
-    even though the actual table1.xml
-    file is missing.
-
-    openpyxl then crashes with:
-
-    KeyError:
-    There is no item named
-    'xl/tables/table1.xml'
-
-    We remove ONLY those broken
-    table references.
-
-    Cell values and pictures remain.
-    """
-
-    REL_NS = (
-        "http://schemas.openxmlformats.org/"
-        "package/2006/relationships"
-    )
 
     MAIN_NS = (
         "http://schemas.openxmlformats.org/"
@@ -199,16 +158,6 @@ def sanitize_broken_table_references(
     DOC_REL_NS = (
         "http://schemas.openxmlformats.org/"
         "officeDocument/2006/relationships"
-    )
-
-    ET.register_namespace(
-        "",
-        REL_NS
-    )
-
-    ET.register_namespace(
-        "r",
-        DOC_REL_NS
     )
 
     source = io.BytesIO(
@@ -249,12 +198,6 @@ def sanitize_broken_table_references(
             removed_ids = set()
 
             changed = False
-
-            # Example:
-            #
-            # sheet1.xml.rels
-            # ->
-            # sheet1.xml
 
             sheet_filename = (
                 rels_name
@@ -310,9 +253,6 @@ def sanitize_broken_table_references(
                         )
                     )
 
-                # If target exists,
-                # everything is fine.
-
                 if target_path in names:
                     continue
 
@@ -355,9 +295,6 @@ def sanitize_broken_table_references(
                 xml_declaration=True,
             )
 
-            # Remove corresponding
-            # <tablePart> from worksheet.
-
             if (
                 sheet_name in names
                 and removed_ids
@@ -388,9 +325,7 @@ def sanitize_broken_table_references(
                     ):
 
                         rid = (
-                            table_part
-                            .attrib
-                            .get(
+                            table_part.attrib.get(
                                 f"{{{DOC_REL_NS}}}"
                                 "id"
                             )
@@ -441,8 +376,7 @@ def sanitize_broken_table_references(
             return content
 
         print(
-            "Removed",
-            removed_total,
+            f"Removed {removed_total} "
             "broken XLSX table "
             "relationship(s)."
         )
@@ -474,11 +408,6 @@ def sanitize_broken_table_references(
                 )
 
         return output.getvalue()
-
-
-# =========================================================
-# BASIC HELPERS
-# =========================================================
 
 
 def clean_text(value) -> str:
@@ -574,11 +503,6 @@ def ext_from_response(
     )
 
 
-# =========================================================
-# MEDIA FROM LINKS
-# =========================================================
-
-
 def clear_old_media(
     section: str,
     no: int,
@@ -616,17 +540,11 @@ def cache_media(
     if not url:
         return ""
 
-    # Normal external URL:
-    # leave as-is.
-
     if not is_yandex_share(
         url
     ):
 
         return url
-
-    # Yandex public link:
-    # download media into site.
 
     try:
 
@@ -644,7 +562,9 @@ def cache_media(
 
         fallback = (
             ".jpg"
-            if kind == "image"
+            if kind.startswith(
+                "image"
+            )
             else ".mp3"
         )
 
@@ -687,30 +607,16 @@ def cache_media(
     except Exception as exc:
 
         print(
-            "WARNING media",
-            url,
-            ":",
-            exc
+            f"WARNING media "
+            f"{url}: {exc}"
         )
 
         return url
 
 
-# =========================================================
-# EMBEDDED / FLOATING PICTURES FROM EXCEL
-# =========================================================
-
-
 def image_anchor_position(
     img
 ):
-    """
-    Returns:
-
-    (excel_row, excel_col)
-
-    Both are 1-based.
-    """
 
     anchor = getattr(
         img,
@@ -720,9 +626,6 @@ def image_anchor_position(
 
     if anchor is None:
         return None
-
-    # Sometimes anchor can
-    # simply be "D2".
 
     if isinstance(
         anchor,
@@ -740,8 +643,6 @@ def image_anchor_position(
         except Exception:
 
             return None
-
-    # Normal openpyxl anchor.
 
     marker = getattr(
         anchor,
@@ -827,24 +728,12 @@ def embedded_image_bytes(
     return raw, ext
 
 
-def embedded_images_for_rows(
+def map_embedded_images_for_rows(
     ws,
-    image_col_index: int | None,
-    cards_per: int,
+    image1_col_index,
+    image2_col_index,
+    cards_per,
 ):
-    """
-    Find floating pictures.
-
-    Picture is assigned to card
-    according to the row where
-    its top-left corner sits.
-
-    Examples:
-
-    D2 = card 1
-    D3 = card 2
-    D4 = card 3
-    """
 
     images = list(
         getattr(
@@ -864,7 +753,7 @@ def embedded_images_for_rows(
 
         return {}
 
-    candidates = defaultdict(
+    by_row = defaultdict(
         list
     )
 
@@ -879,7 +768,8 @@ def embedded_images_for_rows(
         if not pos:
 
             print(
-                f"WARNING {ws.title}: "
+                f"WARNING "
+                f"{ws.title}: "
                 "embedded picture "
                 f"#{order + 1} "
                 "has no readable anchor"
@@ -889,103 +779,203 @@ def embedded_images_for_rows(
 
         excel_row, excel_col = pos
 
-        # Row 1 = header.
-        # Exercise rows begin at 2.
-
         if (
             2
             <= excel_row
             <= cards_per + 1
         ):
 
-            # row_map uses zero-based
-            # indexes, Excel columns
-            # are one-based.
-
-            target_col = (
-                image_col_index + 1
-                if image_col_index
-                is not None
-                else excel_col
-            )
-
-            distance = abs(
-                excel_col
-                - target_col
-            )
-
-            candidates[
+            by_row[
                 excel_row
             ].append(
-                (
-                    distance,
-                    order,
-                    excel_col,
-                    img,
-                )
+                {
+                    "order": order,
+                    "col": excel_col,
+                    "img": img,
+                }
             )
 
-    chosen = {}
+    targets = []
 
-    for (
-        excel_row,
-        row_candidates,
-    ) in candidates.items():
+    if (
+        image1_col_index
+        is not None
+    ):
 
-        # If several pictures exist
-        # in same row, use picture
-        # closest to Image column.
-
-        row_candidates.sort(
-            key=lambda item: (
-                item[0],
-                item[1],
+        targets.append(
+            (
+                "image1",
+                image1_col_index + 1,
             )
         )
 
-        (
-            distance,
-            _,
-            excel_col,
-            img,
-        ) = row_candidates[0]
+    if (
+        image2_col_index
+        is not None
+    ):
 
-        chosen[
-            excel_row
-        ] = img
+        targets.append(
+            (
+                "image2",
+                image2_col_index + 1,
+            )
+        )
 
-        if (
-            image_col_index
-            is not None
-            and distance
+    mapped = {}
+
+    for (
+        excel_row,
+        candidates,
+    ) in by_row.items():
+
+        row_images = {}
+
+        if not targets:
+
+            ordered = sorted(
+                candidates,
+                key=lambda c: (
+                    c["col"],
+                    c["order"],
+                ),
+            )
+
+            if ordered:
+
+                row_images[
+                    "image1"
+                ] = ordered[0]["img"]
+
+            if len(ordered) > 1:
+
+                row_images[
+                    "image2"
+                ] = ordered[1]["img"]
+
+            mapped[
+                excel_row
+            ] = row_images
+
+            continue
+
+        max_assign = min(
+            len(candidates),
+            len(targets),
+        )
+
+        best = None
+
+        for target_subset in (
+            itertools.combinations(
+                targets,
+                max_assign,
+            )
         ):
 
-            print(
-                f"NOTE {ws.title}: "
-                f"picture in row "
-                f"{excel_row} "
-                "is anchored in "
-                f"column {excel_col}; "
-                "using it for Image "
-                f"column "
-                f"{image_col_index + 1}."
-            )
+            for candidate_perm in (
+                itertools.permutations(
+                    candidates,
+                    max_assign,
+                )
+            ):
+
+                cost = sum(
+                    abs(
+                        candidate_perm[i]["col"]
+                        - target_subset[i][1]
+                    )
+                    for i in range(
+                        max_assign
+                    )
+                )
+
+                tie = tuple(
+                    c["order"]
+                    for c in candidate_perm
+                )
+
+                score = (
+                    cost,
+                    tie,
+                )
+
+                if (
+                    best is None
+                    or score < best[0]
+                ):
+
+                    best = (
+                        score,
+                        target_subset,
+                        candidate_perm,
+                    )
+
+        if best:
+
+            (
+                _,
+                target_subset,
+                candidate_perm,
+            ) = best
+
+            for (
+                (
+                    key,
+                    target_col,
+                ),
+                candidate,
+            ) in zip(
+                target_subset,
+                candidate_perm,
+            ):
+
+                row_images[
+                    key
+                ] = candidate["img"]
+
+                distance = abs(
+                    candidate["col"]
+                    - target_col
+                )
+
+                if distance:
+
+                    print(
+                        f"NOTE {ws.title}: "
+                        f"picture in row "
+                        f"{excel_row}, "
+                        f"column "
+                        f"{candidate['col']} "
+                        f"mapped to {key} "
+                        f"column {target_col}."
+                    )
+
+        mapped[
+            excel_row
+        ] = row_images
+
+    mapped_count = sum(
+        len(v)
+        for v in mapped.values()
+    )
 
     print(
         f"{ws.title}: "
         f"{len(images)} "
         "embedded picture(s), "
-        f"{len(chosen)} "
-        "mapped to exercise row(s)"
+        f"{mapped_count} "
+        "mapped to "
+        "Image 1 / Image 2"
     )
 
-    return chosen
+    return mapped
 
 
 def save_embedded_image(
     img,
     section: str,
     no: int,
+    kind: str,
 ) -> str:
 
     raw, ext = (
@@ -1007,12 +997,12 @@ def save_embedded_image(
     clear_old_media(
         section,
         no,
-        "image",
+        kind,
     )
 
     path = (
         folder
-        / f"{no:02d}-image{ext}"
+        / f"{no:02d}-{kind}{ext}"
     )
 
     path.write_bytes(
@@ -1024,11 +1014,6 @@ def save_embedded_image(
         .relative_to(ROOT)
         .as_posix()
     )
-
-
-# =========================================================
-# TABLE HEADERS
-# =========================================================
 
 
 def row_map(
@@ -1063,11 +1048,34 @@ def row_map(
             "ссылка",
         ],
 
-        "image": [
+        "image1": [
+            "image 1",
+            "image1",
+            "image_1",
+            "picture 1",
+            "picture1",
+            "img 1",
+            "img1",
+            "картинка 1",
+            "картинка1",
+
+            # old column name
             "image",
             "picture",
             "img",
             "картинка",
+        ],
+
+        "image2": [
+            "image 2",
+            "image2",
+            "image_2",
+            "picture 2",
+            "picture2",
+            "img 2",
+            "img2",
+            "картинка 2",
+            "картинка2",
         ],
 
         "audio": [
@@ -1155,6 +1163,12 @@ def make_default(
         "image":
             "",
 
+        "image1":
+            "",
+
+        "image2":
+            "",
+
         "audio":
             "",
 
@@ -1167,11 +1181,6 @@ def make_default(
         "active":
             True,
     }
-
-
-# =========================================================
-# MAIN
-# =========================================================
 
 
 def main():
@@ -1207,29 +1216,17 @@ def main():
             {},
     }
 
-    # 1. Download fresh Yandex file.
-
     content = (
         download_public_file(
             public_url
         )
     )
 
-    # 2. Repair broken XLSX table
-    # references created by Yandex.
-
     content = (
         sanitize_broken_table_references(
             content
         )
     )
-
-    # IMPORTANT:
-    #
-    # read_only=False
-    #
-    # is required because otherwise
-    # openpyxl will NOT load pictures.
 
     wb = load_workbook(
         io.BytesIO(
@@ -1247,7 +1244,6 @@ def main():
     )
 
     total_populated = 0
-
     total_embedded = 0
 
     for sec in (
@@ -1340,24 +1336,31 @@ def main():
                 f"{rows[0]}"
             )
 
-        # Find floating pictures.
+        print(
+            f"{sheet_name} "
+            f"header map: {mapping}"
+        )
 
-        embedded_by_excel_row = (
-            embedded_images_for_rows(
+        embedded_by_row = (
+            map_embedded_images_for_rows(
                 ws,
                 mapping.get(
-                    "image"
+                    "image1"
+                ),
+                mapping.get(
+                    "image2"
                 ),
                 cards_per,
             )
         )
 
-        total_embedded += len(
-            embedded_by_excel_row
+        total_embedded += sum(
+            len(v)
+            for v
+            in embedded_by_row.values()
         )
 
         populated = 0
-
         embedded_used = 0
 
         for (
@@ -1449,6 +1452,12 @@ def main():
                 "image":
                     "",
 
+                "image1":
+                    "",
+
+                "image2":
+                    "",
+
                 "audio":
                     "",
 
@@ -1472,72 +1481,82 @@ def main():
                     active,
             }
 
-            # ---------------------------------
-            # EMBEDDED PICTURE
-            # ---------------------------------
-
-            embedded_img = (
-                embedded_by_excel_row.get(
-                    excel_row
+            row_images = (
+                embedded_by_row.get(
+                    excel_row,
+                    {},
                 )
             )
 
-            if (
-                embedded_img
-                is not None
+            for key in (
+                "image1",
+                "image2",
             ):
 
-                try:
-
-                    card[
-                        "image"
-                    ] = (
-                        save_embedded_image(
-                            embedded_img,
-                            slug,
-                            no,
-                        )
+                embedded_img = (
+                    row_images.get(
+                        key
                     )
-
-                    embedded_used += 1
-
-                except Exception as exc:
-
-                    print(
-                        "WARNING",
-                        sheet_name,
-                        "row",
-                        excel_row,
-                        ": could not extract "
-                        "embedded image:",
-                        exc,
-                    )
-
-            # ---------------------------------
-            # IMAGE LINK FALLBACK
-            # ---------------------------------
-
-            if not card[
-                "image"
-            ]:
-
-                card[
-                    "image"
-                ] = cache_media(
-                    val(
-                        row,
-                        mapping.get(
-                            "image"
-                        ),
-                    ),
-                    slug,
-                    no,
-                    "image",
                 )
 
-            # ---------------------------------
-            # AUDIO
-            # ---------------------------------
+                if (
+                    embedded_img
+                    is not None
+                ):
+
+                    try:
+
+                        card[
+                            key
+                        ] = (
+                            save_embedded_image(
+                                embedded_img,
+                                slug,
+                                no,
+                                key,
+                            )
+                        )
+
+                        embedded_used += 1
+
+                    except Exception as exc:
+
+                        print(
+                            f"WARNING "
+                            f"{sheet_name} "
+                            f"row "
+                            f"{excel_row}: "
+                            f"could not "
+                            f"extract "
+                            f"{key}: "
+                            f"{exc}"
+                        )
+
+                if not card[
+                    key
+                ]:
+
+                    card[
+                        key
+                    ] = cache_media(
+                        val(
+                            row,
+                            mapping.get(
+                                key
+                            ),
+                        ),
+                        slug,
+                        no,
+                        key,
+                    )
+
+            # compatibility with
+            # older app code
+            card[
+                "image"
+            ] = card[
+                "image1"
+            ]
 
             card[
                 "audio"
@@ -1564,7 +1583,8 @@ def main():
                 for k in (
                     "title",
                     "link",
-                    "image",
+                    "image1",
+                    "image2",
                     "audio",
                     "notes",
                 )
