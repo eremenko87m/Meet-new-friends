@@ -19,6 +19,7 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+
 jobs:
 
   build:
@@ -32,35 +33,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+
       - name: Setup Python
         uses: actions/setup-python@v6
 
         with:
           python-version: "3.12"
 
+
       - name: Install sync dependencies
 
         run: |
+          python -m pip install --upgrade pip
           pip install requests openpyxl pillow
+
 
       - name: Sync fresh data from Yandex Table
 
         run: |
           python scripts/sync_yandex.py
 
+
       - name: Show sync result
 
         run: |
-
           python - <<'PY'
-
           import json
-
           from pathlib import Path
 
-          p = Path(
-              "data/exercises.json"
-          )
+          p = Path("data/exercises.json")
 
           d = json.loads(
               p.read_text(
@@ -70,28 +71,20 @@ jobs:
 
           print(
               "generatedAt:",
-              d.get(
-                  "generatedAt"
-              )
+              d.get("generatedAt")
           )
 
           print(
               "source:",
-              d.get(
-                  "source"
-              )
+              d.get("source")
           )
 
-          for (
-              name,
-              cards,
-          ) in d.get(
+          for name, cards in d.get(
               "sections",
               {}
           ).items():
 
               populated = sum(
-
                   bool(
                       c.get("title")
                       or c.get("link")
@@ -99,39 +92,43 @@ jobs:
                       or c.get("image")
                       or c.get("notes")
                   )
-
                   for c in cards
               )
 
               with_images = sum(
-
                   bool(
-                      c.get(
-                          "image"
-                      )
+                      c.get("image")
                   )
+                  for c in cards
+              )
 
+              with_audio = sum(
+                  bool(
+                      c.get("audio")
+                  )
                   for c in cards
               )
 
               print(
                   f"{name}: "
-                  f"{populated} "
-                  "populated cards; "
-                  f"{with_images} "
-                  "with images"
+                  f"{populated} populated cards; "
+                  f"{with_images} with images; "
+                  f"{with_audio} with audio"
               )
 
           PY
 
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
+
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v4
 
         with:
           path: .
+
 
   deploy:
 
