@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07183f" />
+    <meta
+      name="description"
+      content="A classroom speaking game for meeting new friends and finding a hobby match."
+    />
+    <title>World Friends Club</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="masthead">
+        <div class="brand-mark" aria-hidden="true">W</div>
+        <div class="title-group">
+          <p class="eyebrow">SPEAKING GAME</p>
+          <h1>World Friends Club</h1>
+          <p class="mission">Draw a card. Meet your new friend. Find a hobby match.</p>
+        </div>
+        <div class="mini-steps" aria-label="How to play">
+          <span><b>1</b> Draw</span>
+          <span><b>2</b> Talk</span>
+          <span><b>3</b> Match</span>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="chat-guide" aria-labelledby="guide-title">
+          <div class="chat-phone">
+            <div class="chat-speaker" aria-hidden="true"></div>
+            <div class="chat-screen">
+              <div class="chat-topbar">
+                <div class="chat-avatar" aria-hidden="true">W</div>
+                <div>
+                  <p>WORLD FRIENDS</p>
+                  <h2 id="guide-title">Conversation guide</h2>
+                </div>
+                <span class="question-count">6 questions</span>
+              </div>
+
+              <ol class="chat-thread">
+                <li class="exchange">
+                  <div class="bubble question">What’s your name?</div>
+                  <div class="bubble answer">My name’s Anna Petrova.</div>
+                </li>
+                <li class="exchange">
+                  <div class="bubble question">Sorry? Can you spell that, please?</div>
+                  <div class="bubble answer">Yes! P-E-T-R-O-V-A.</div>
+                </li>
+                <li class="exchange">
+                  <div class="bubble question">Where are you from?</div>
+                  <div class="bubble answer">I’m from Russia.</div>
+                </li>
+                <li class="exchange">
+                  <div class="bubble question">What’s your phone number?</div>
+                  <div class="bubble answer">It’s 482 719 306.</div>
+                </li>
+                <li class="exchange">
+                  <div class="bubble question">How old are you?</div>
+                  <div class="bubble answer">I’m ten.</div>
+                </li>
+                <li class="exchange hobby-exchange">
+                  <div class="bubble question">What do you like doing?</div>
+                  <div class="bubble answer">I like dancing.</div>
+                </li>
+              </ol>
+
+              <p class="chat-note">Use your card to change the blue answers.</p>
+            </div>
+          </div>
+        </aside>
+
+        <section class="game-panel" aria-label="Two-player card game">
+          <div class="game-board">
+            <article class="player player-a">
+              <div class="player-label">
+                <span>PHONE A</span>
+                <strong>Player A</strong>
+              </div>
+
+              <div class="phone">
+                <div class="phone-speaker" aria-hidden="true"></div>
+                <div class="phone-screen">
+                  <div class="status-bar">
+                    <span>WORLD FRIENDS</span>
+                    <span class="signal" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span>PLAYER A</span>
+                  </div>
+                  <div class="card-stage" id="stage-a">
+                    <img id="card-a" src="" alt="" />
+                  </div>
+                  <div class="phone-actions">
+                    <span class="counter" id="counter-a" aria-live="polite">Card 1 / 8</span>
+                    <button type="button" class="single-button" id="draw-a">
+                      <span>NEW CARD</span>
+                      <span class="button-arrow" aria-hidden="true">→</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <div class="pair-control">
+              <p>CHANGE BOTH</p>
+              <button type="button" class="pair-button" id="draw-both">
+                <span class="pair-cards" aria-hidden="true"><i></i><i></i></span>
+                <span class="pair-copy"><small>BOTH PHONES</small>NEW PAIR</span>
+                <span class="pair-arrow" aria-hidden="true">↻</span>
+              </button>
+              <span class="pair-hint">two new cards</span>
+            </div>
+
+            <article class="player player-b">
+              <div class="player-label">
+                <span>PHONE B</span>
+                <strong>Player B</strong>
+              </div>
+
+              <div class="phone">
+                <div class="phone-speaker" aria-hidden="true"></div>
+                <div class="phone-screen">
+                  <div class="status-bar">
+                    <span>WORLD FRIENDS</span>
+                    <span class="signal" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span>PLAYER B</span>
+                  </div>
+                  <div class="card-stage" id="stage-b">
+                    <img id="card-b" src="" alt="" />
+                  </div>
+                  <div class="phone-actions">
+                    <span class="counter" id="counter-b" aria-live="polite">Card 1 / 8</span>
+                    <button type="button" class="single-button" id="draw-b">
+                      <span>NEW CARD</span>
+                      <span class="button-arrow" aria-hidden="true">→</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
