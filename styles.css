@@ -1273,3 +1273,29 @@ h1 {
     font-size: 1.05rem;
   }
 }
+/* ---------- ONE CARD MODE: desktop alignment ---------- */
+@media (min-width: 1081px) {
+
+  .single-game-board {
+    position: relative;
+  }
+
+  .single-heading {
+    position: absolute;
+    top: -29px;
+    left: 50%;
+    width: min(100%, 480px);
+    margin: 0;
+    transform: translateX(-50%);
+    z-index: 5;
+  }
+
+  .single-phone {
+    margin-top: 0;
+  }
+
+  .single-heading strong {
+    max-width: 300px;
+    line-height: 1.2;
+  }
+}
