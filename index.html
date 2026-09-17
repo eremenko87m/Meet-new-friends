@@ -21,14 +21,39 @@
           <h1>World Friends Club</h1>
           <p class="mission">Draw a card. Meet your new friend. Find a hobby match.</p>
         </div>
-        <div class="mini-steps" aria-label="How to play">
+        <button type="button" class="mode-back is-hidden" id="mode-back">← CHOOSE MODE</button>
+        <div class="mini-steps" id="mini-steps" aria-label="How to play">
           <span><b>1</b> Draw</span>
           <span><b>2</b> Talk</span>
           <span><b>3</b> Match</span>
         </div>
       </header>
 
-      <div class="workspace">
+      <section class="mode-screen" id="mode-screen" aria-labelledby="mode-title">
+        <div class="mode-card">
+          <p class="mode-kicker">HOW DO YOU WANT TO PLAY?</p>
+          <h2 id="mode-title">Choose the number of cards</h2>
+          <p class="mode-intro">Use one card for whole-class speaking, or two cards for pair work.</p>
+
+          <div class="mode-options">
+            <button type="button" class="mode-option mode-one" id="choose-one">
+              <span class="mode-icon single-card-icon" aria-hidden="true"><i></i></span>
+              <span class="mode-number">1 CARD</span>
+              <strong>One friend at a time</strong>
+              <small>Open a message, talk, then get a new friend.</small>
+            </button>
+
+            <button type="button" class="mode-option mode-two" id="choose-two">
+              <span class="mode-icon double-card-icon" aria-hidden="true"><i></i><i></i></span>
+              <span class="mode-number">2 CARDS</span>
+              <strong>Pair speaking game</strong>
+              <small>Two phones, two characters, just like the original game.</small>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="workspace is-hidden" id="game-workspace">
         <aside class="chat-guide" aria-labelledby="guide-title">
           <div class="chat-phone">
             <div class="chat-speaker" aria-hidden="true"></div>
@@ -64,7 +89,7 @@
                   <div class="bubble answer">I’m ten.</div>
                 </li>
                 <li class="exchange hobby-exchange">
-                  <div class="bubble question">What do you like doing?</div>
+                  <div class="bubble question">What’s your hobby?</div>
                   <div class="bubble answer">I like dancing.</div>
                 </li>
               </ol>
@@ -74,7 +99,69 @@
           </div>
         </aside>
 
-        <section class="game-panel" aria-label="Two-player card game">
+        <section class="game-panel single-mode-panel is-hidden" id="single-mode" aria-label="One-card speaking game">
+          <div class="single-game-board">
+            <div class="single-heading">
+              <span>ONE CARD MODE</span>
+              <strong>Tap the new message to open your friend’s card.</strong>
+            </div>
+
+            <div class="phone single-phone">
+              <div class="phone-speaker" aria-hidden="true"></div>
+              <div class="phone-screen single-phone-screen">
+                <div class="status-bar">
+                  <span>WORLD FRIENDS</span>
+                  <span class="signal" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span>INBOX</span>
+                </div>
+
+                <div class="single-inbox" id="single-inbox">
+                  <div class="inbox-header">
+                    <div>
+                      <p>NEW MESSAGE</p>
+                      <h3>Someone wants to meet you!</h3>
+                    </div>
+                    <span class="unread-dot" aria-hidden="true"></span>
+                  </div>
+
+                  <button type="button" class="friend-message" id="open-single-card">
+                    <span class="message-thumb">
+                      <img id="single-thumb" src="" alt="" />
+                    </span>
+                    <span class="message-copy">
+                      <small>WORLD FRIENDS CLUB</small>
+                      <strong id="single-message-name">New friend</strong>
+                      <span>Tap to open the profile card</span>
+                    </span>
+                    <span class="message-arrow" aria-hidden="true">›</span>
+                  </button>
+
+                  <div class="inbox-tip">
+                    <span aria-hidden="true">💬</span>
+                    <p>Open the card, use the conversation guide, then come back for another friend.</p>
+                  </div>
+                </div>
+
+                <div class="single-card-view is-hidden" id="single-card-view">
+                  <div class="card-stage single-card-stage" id="stage-single">
+                    <img id="card-single" src="" alt="" />
+                  </div>
+                  <button type="button" class="back-to-inbox" id="back-to-inbox">← BACK TO MESSAGE</button>
+                </div>
+
+                <div class="single-footer">
+                  <span class="counter" id="counter-single" aria-live="polite">Friend 1 / 16</span>
+                  <button type="button" class="single-button single-next-button" id="draw-single">
+                    <span>NEXT FRIEND</span>
+                    <span class="button-arrow" aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="game-panel pair-mode-panel is-hidden" id="pair-mode" aria-label="Two-player card game">
           <div class="game-board">
             <article class="player player-a">
               <div class="player-label">
